@@ -10,7 +10,7 @@
 -export([try_type_cast/1]).
 
 
-
+%% @doc Load a FITS file and return the binary content
 load_fits_file(File_path) 
 when 
     is_list(File_path) ->
@@ -58,8 +58,13 @@ when is_list(Input_string) ->
             end
     end.
 
+
+%% @doc helper function for starting parse_header/2
 parse_header(Binary) ->
     parse_header(Binary, []).
+%% @doc Parses a binary for Key, Value, Comment tuples
+%% stops parsing on the occurence of a line starting with "END"
+%% Returns a List of {Keyword, Value, Comment} tuples for the header
 parse_header(Binary, Plain_text_header) ->
     <<Line:80/binary, Rest/binary>> = Binary,
     case binary_part(Line, 0, 3) of
@@ -89,13 +94,5 @@ parse_header(Binary, Plain_text_header) ->
             parse_header(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
     end.
 
-%~ get_hdu(1, Fits) ->
-    %~ binary_part(Bin, 0,2879)
-    
 
-
-
-
-%~ parse_fits_file(File_path) ->
-    %~ {ok, Fits} = load_fits_file(File_path),
     
