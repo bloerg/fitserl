@@ -1,10 +1,10 @@
--module(fitserl).
 %% @author Jörg Brünecke <devel@bloerg.de>
 %% @doc FITS format input/output routines
 %% The module provides functions for reading, writing and parsing 
 %% FITS files
 %% @reference <a href="http://fits.gsfc.nasa.gov/fits_documentation.html">NASA FITS Documentation</a>
 
+-module(fitserl).
 -export([load_fits_file/1]).
 -export([get_hdus/1, parse_hdu_header/1, parse_hdu_header/2]).
 
@@ -59,8 +59,6 @@ when is_list(Input_string) ->
     end.
 
 
-
-
 %% @doc helper function for starting parse_header/2
 %% Input is Binary_data containing an hdu starting at offset 0
 parse_hdu_header(Binary) when is_binary(Binary) ->
@@ -90,17 +88,21 @@ when is_integer(Hdu_number),
             false -> {error, out_of_hdu_range}
         end;
 
-%% @doc Parses a binary for Key, Value, Comment tuples
+%% @doc recursively parses a binary for Key, Value, Comment tuples
 %% stops parsing on the occurence of a line starting with "END"
-%% Returns a List of {Keyword, Value, Comment} tuples for the header
+%% Returns a list of {Keyword, Value, Comment} tuples for the header
 parse_hdu_header(Binary, Plain_text_header) ->
     case Binary of 
+        % split off the next/last line of 80 characters
         <<Line:80/binary, Rest/binary>> -> ok;
         <<Line:80/binary>> -> Rest = <<>>
     end,
     case binary_part(Line, 0, 3) of
+        % end of hdu header, return result
         <<"END">> -> Plain_text_header;
+        % go on processing keyword record
         _ -> 
+            % comments are separated by "/"
             case binary:split(Line, <<"/">>) of
                 % FIXME: What if the Value or comment contain one or
                 % several "/"?
@@ -110,6 +112,7 @@ parse_hdu_header(Binary, Plain_text_header) ->
                     Comment_string = [],
                     Key_and_value = Line
             end,
+            % keywords and values are separated by "="
             case binary:split(Key_and_value, <<"=">>) of
                 [Key_word, Value] ->
                     Key_word_string = string:strip(binary_to_list(Key_word)),
@@ -137,7 +140,7 @@ parse_hdu_header(Binary, Plain_text_header) ->
     
 
 
-%% @doc find all hdus and return a list of 
+%% @doc recursively find all hdus and return a list of 
 % {Hdu_number, Header_start_byte_offset} tuples
 % returns [] if no hdu is found
 get_hdus(Fits) ->
