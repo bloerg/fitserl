@@ -130,15 +130,6 @@ parse_hdu_header(Binary, Plain_text_header) ->
             parse_hdu_header(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
     end.
 
-%~ %% @doc helper function for starting parse_header/2
-%~ parse_hdu_data(Binary) ->
-    %~ parse_hdu_data(Binary, <<>>).
-%~ %% @doc Parses a binary for Key, Value, Comment tuples
-%~ %% stops parsing on the occurence of a line starting with "END"
-%~ %% Returns a List of {Keyword, Value, Comment} tuples for the header
-%~ parse_hdu_header(Binary, Data) ->
-
-
 
 %% @doc helper function fo rstarting find_hdu_data/2
 find_hdu_data(Binary) when is_binary(Binary)-> 
