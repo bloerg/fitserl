@@ -6,7 +6,7 @@
 %% @reference <a href="http://fits.gsfc.nasa.gov/fits_documentation.html">NASA FITS Documentation</a>
 
 -export([load_fits_file/1]).
--export([get_hdus/1, parse_hdu/1]).
+-export([get_hdus/1, parse_hdu_header/1]).
 
 
 
@@ -60,12 +60,12 @@ when is_list(Input_string) ->
 
 
 %% @doc helper function for starting parse_header/2
-parse_hdu(Binary) ->
-    parse_hdu(Binary, []).
+parse_hdu_header(Binary) ->
+    parse_hdu_header(Binary, []).
 %% @doc Parses a binary for Key, Value, Comment tuples
 %% stops parsing on the occurence of a line starting with "END"
 %% Returns a List of {Keyword, Value, Comment} tuples for the header
-parse_hdu(Binary, Plain_text_header) ->
+parse_hdu_header(Binary, Plain_text_header) ->
     <<Line:80/binary, Rest/binary>> = Binary,
     case binary_part(Line, 0, 3) of
         <<"END">> -> Plain_text_header;
@@ -93,7 +93,7 @@ parse_hdu(Binary, Plain_text_header) ->
                     Key_word_string = string:strip(binary_to_list(Key_word)),
                     Value_string = string:strip(binary_to_list(Value))
             end,
-            parse_hdu(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
+            parse_hdu_header(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
     end.
 
 
