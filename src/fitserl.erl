@@ -6,8 +6,8 @@
 %% @reference <a href="http://fits.gsfc.nasa.gov/fits_documentation.html">NASA FITS Documentation</a>
 
 -export([load_fits_file/1]).
--export([parse_header/1]).
--export([try_type_cast/1]).
+-export([get_hdus/1, parse_hdu/1]).
+
 
 
 %% @doc Load a FITS file and return the binary content
@@ -60,17 +60,19 @@ when is_list(Input_string) ->
 
 
 %% @doc helper function for starting parse_header/2
-parse_header(Binary) ->
-    parse_header(Binary, []).
+parse_hdu(Binary) ->
+    parse_hdu(Binary, []).
 %% @doc Parses a binary for Key, Value, Comment tuples
 %% stops parsing on the occurence of a line starting with "END"
 %% Returns a List of {Keyword, Value, Comment} tuples for the header
-parse_header(Binary, Plain_text_header) ->
+parse_hdu(Binary, Plain_text_header) ->
     <<Line:80/binary, Rest/binary>> = Binary,
     case binary_part(Line, 0, 3) of
         <<"END">> -> Plain_text_header;
         _ -> 
             case binary:split(Line, <<"/">>) of
+                % FIXME: What if the Value or comment contain one or
+                % several "/"?
                 [Key_and_value, Comment] ->
                     Comment_string = string:strip(binary_to_list(Comment));
                 [_Else] -> 
@@ -91,8 +93,37 @@ parse_header(Binary, Plain_text_header) ->
                     Key_word_string = string:strip(binary_to_list(Key_word)),
                     Value_string = string:strip(binary_to_list(Value))
             end,
-            parse_header(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
+            parse_hdu(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
     end.
 
 
-    
+%% @doc find all hdus and return a list of 
+% {Hdu_number, Header_start_byte_offset} tuples
+% returns [] if no hdu is found
+get_hdus(Fits) ->
+    get_hdus(Fits, 0, []).
+get_hdus(Fits, Block_count, Result) ->
+    case Fits of 
+        <<Key_word:8/binary, _:2872/binary, Rest/binary>> -> ok;
+        <<>> -> 
+            Key_word = <<>>,
+            Rest = <<>>;
+        <<Rest/binary>> -> Key_word = <<>>  % this acually means a truncated hdu
+    end,
+    case Key_word of
+        % end of Fits
+        <<>> -> 
+            lists:reverse(Result);
+        % primary hdu
+        <<"SIMPLE",_/binary>> ->
+            New_result = [{Block_count+1, Block_count*2880}|Result],
+            get_hdus(Rest, Block_count + 1, New_result);
+        % additional hdu
+        <<"XTENSION",_/binary>> ->
+            New_result = [{Block_count+1, Block_count*2880}|Result],
+            get_hdus(Rest, Block_count + 1, New_result);
+        % somewhere in between
+        _Else -> 
+            get_hdus(Rest, Block_count + 1, Result)
+    end.
+
