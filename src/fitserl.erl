@@ -7,7 +7,7 @@
 -module(fitserl).
 -export([load_fits_file/1]).
 -export([get_hdus/1, parse_hdu_header/1, parse_hdu_header/2]).
-
+-export([get_hdu_data/1, get_hdu_data/2, get_hdu_data/3, find_hdu_data/1]).
 
 
 %% @doc Load a FITS file and return the binary content
@@ -137,7 +137,87 @@ parse_hdu_header(Binary, Plain_text_header) ->
 %~ %% stops parsing on the occurence of a line starting with "END"
 %~ %% Returns a List of {Keyword, Value, Comment} tuples for the header
 %~ parse_hdu_header(Binary, Data) ->
+
+
+
+%% @doc helper function fo rstarting find_hdu_data/2
+find_hdu_data(Binary) when is_binary(Binary)-> 
+    find_hdu_data(Binary,0).
+
+%% @doc recursively walks through binary trying to find a line beginning
+%% with "END". Then returns the byte offset of 2880 bytes * N + 1 after
+%% the "END". This is the next possible position for a data section in 
+%% an hdu.
+find_hdu_data(Binary, Blocks_of_80_bytes) ->
+    case Binary of
+        % split off the next/last line of 80 characters
+        <<Line:80/binary, Rest/binary>> -> ok;
+        <<Line:80/binary>> -> Rest = <<>>;
+        _ -> 
+            Line = <<>>,
+            Rest = <<>>
+    end,
+    case binary_part(Line, 0, min(3, byte_size(Line))) of
+        % end of hdu header, return result
+        <<"END">> -> 
+            Possible_data_start_pos = (Blocks_of_80_bytes * 80) 
+             + (2880 - Blocks_of_80_bytes * 80 rem 2880),
+             Possible_data_start_pos;
+        <<>> -> {error, malformed_hdu};
+        _Else -> 
+            find_hdu_data(Rest, Blocks_of_80_bytes + 1)
+    end.
     
+
+%% @doc helper function for starting get_hdu_data/1
+%% with the number of the hdu as input (starting at 1)
+get_hdu_data(Hdu_number, Fits)
+when is_integer(Hdu_number),
+     is_binary(Fits) ->
+        % get the byte offset in Fits of the hdu with number Hdu_number
+        case lists:keyfind(Hdu_number, 1, get_hdus(Fits)) of
+            {Hdu_number, Pos} -> 
+                Next_hdu_number = Hdu_number + 1,
+                % get the length of the hdu with Hdu_number from the
+                % difference of (the staring position of the next hdu or
+                % the end position of Fits) and the start position of
+                % the hdu
+                Len =
+                    case lists:keyfind(Next_hdu_number, 1, get_hdus(Fits)) of
+                        {Next_hdu_number, Byte_end} -> Byte_end - Pos;
+                        false -> byte_size(Fits) - Pos
+                    end,
+                % start parsing
+                get_hdu_data(binary_part(Fits, Pos, Len));
+            % there is no hdu with Hdu_number
+            false -> {error, out_of_hdu_range}
+        end.
+                
+%% @doc helper function for starting get_hdu_data/3
+%% Input is a Binary containing an hdu
+%% calls find_hdu(Binary) to get the possible offset of the
+%% first data section within the Binary
+get_hdu_data(Binary) when is_binary(Binary)->
+    get_hdu_data(Binary, find_hdu_data(Binary), <<>>).
+
+%% @doc get the binary data out of an hdu
+%% returns <<>> if there is no data and the binary data representation
+%% if data exists
+get_hdu_data(Binary, Start_offset, Data) ->
+    case Binary of 
+        % end of binary
+        <<>> -> Data;
+        % next hdu starts
+        <<_:(Start_offset)/binary,"XTENSION",_/binary>> -> Data;
+        % next one should not happen because SIMPLE /can/ only occur at
+        % the beginning of a fits file
+        <<_:(Start_offset)/binary,"SIMPLE",_/binary>> -> Data; 
+        %within the data section
+        <<_:(Start_offset)/binary,Block_of_2880_bytes:2880/binary, Rest/binary>> ->
+            get_hdu_data(Rest, 0, <<Data/binary, Block_of_2880_bytes/binary>>);
+        %hdu has no data section
+        _Else -> <<>>
+    end.
 
 
 %% @doc recursively find all hdus and return a list of 
