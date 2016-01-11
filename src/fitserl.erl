@@ -6,7 +6,7 @@
 %% @reference <a href="http://fits.gsfc.nasa.gov/fits_documentation.html">NASA FITS Documentation</a>
 
 -export([load_fits_file/1]).
--export([get_hdus/1, parse_hdu_header/1]).
+-export([get_hdus/1, parse_hdu_header/1, parse_hdu_header/2]).
 
 
 
@@ -59,14 +59,45 @@ when is_list(Input_string) ->
     end.
 
 
+
+
 %% @doc helper function for starting parse_header/2
-parse_hdu_header(Binary) ->
+%% Input is Binary_data containing an hdu starting at offset 0
+parse_hdu_header(Binary) when is_binary(Binary) ->
     parse_hdu_header(Binary, []).
+
+%% @doc helper function for starting parse_header/2
+%% with the number of the hdu as input (starting at 1)
+parse_hdu_header(Hdu_number, Fits) 
+when is_integer(Hdu_number),
+     is_binary(Fits) ->
+        % get the byte offset in Fits of the hdu with number Hdu_number
+        case lists:keyfind(Hdu_number, 1, get_hdus(Fits)) of
+            {Hdu_number, Pos} -> 
+                Next_hdu_number = Hdu_number + 1,
+                % get the length of the hdu with Hdu_number from the
+                % difference of (the staring position of the next hdu or
+                % the end position of Fits) and the start position of
+                % the hdu
+                Len =
+                    case lists:keyfind(Next_hdu_number, 1, get_hdus(Fits)) of
+                        {Next_hdu_number, Byte_end} -> Byte_end - Pos;
+                        false -> byte_size(Fits) - Pos
+                    end,
+                % start parsing
+                parse_hdu_header(binary_part(Fits, Pos, Len));
+            % there is no hdu with Hdu_number
+            false -> {error, out_of_hdu_range}
+        end;
+
 %% @doc Parses a binary for Key, Value, Comment tuples
 %% stops parsing on the occurence of a line starting with "END"
 %% Returns a List of {Keyword, Value, Comment} tuples for the header
 parse_hdu_header(Binary, Plain_text_header) ->
-    <<Line:80/binary, Rest/binary>> = Binary,
+    case Binary of 
+        <<Line:80/binary, Rest/binary>> -> ok;
+        <<Line:80/binary>> -> Rest = <<>>
+    end,
     case binary_part(Line, 0, 3) of
         <<"END">> -> Plain_text_header;
         _ -> 
@@ -96,6 +127,15 @@ parse_hdu_header(Binary, Plain_text_header) ->
             parse_hdu_header(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
     end.
 
+%~ %% @doc helper function for starting parse_header/2
+%~ parse_hdu_data(Binary) ->
+    %~ parse_hdu_data(Binary, <<>>).
+%~ %% @doc Parses a binary for Key, Value, Comment tuples
+%~ %% stops parsing on the occurence of a line starting with "END"
+%~ %% Returns a List of {Keyword, Value, Comment} tuples for the header
+%~ parse_hdu_header(Binary, Data) ->
+    
+
 
 %% @doc find all hdus and return a list of 
 % {Hdu_number, Header_start_byte_offset} tuples
@@ -116,11 +156,11 @@ get_hdus(Fits, Block_count, Result) ->
             lists:reverse(Result);
         % primary hdu
         <<"SIMPLE",_/binary>> ->
-            New_result = [{Block_count+1, Block_count*2880}|Result],
+            New_result = [{length(Result) + 1, Block_count*2880}|Result],
             get_hdus(Rest, Block_count + 1, New_result);
         % additional hdu
         <<"XTENSION",_/binary>> ->
-            New_result = [{Block_count+1, Block_count*2880}|Result],
+            New_result = [{length(Result) + 1, Block_count*2880}|Result],
             get_hdus(Rest, Block_count + 1, New_result);
         % somewhere in between
         _Else -> 
