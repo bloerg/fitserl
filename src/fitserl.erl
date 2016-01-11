@@ -6,8 +6,9 @@
 
 -module(fitserl).
 -export([load_fits_file/1]).
--export([get_hdus/1, parse_hdu_header/1, parse_hdu_header/2]).
+-export([get_hdus/1, get_hdu_header/1, get_hdu_header/2]).
 -export([get_hdu_data/1, get_hdu_data/2, get_hdu_data/3, find_hdu_data/1]).
+-export([parse_binary_table/2, binary_table_extract_rows/2, binary_table_extract_fields/2]).
 
 
 %% @doc Load a FITS file and return the binary content
@@ -61,12 +62,12 @@ when is_list(Input_string) ->
 
 %% @doc helper function for starting parse_header/2
 %% Input is Binary_data containing an hdu starting at offset 0
-parse_hdu_header(Binary) when is_binary(Binary) ->
-    parse_hdu_header(Binary, []).
+get_hdu_header(Binary) when is_binary(Binary) ->
+    get_hdu_header(Binary, []).
 
 %% @doc helper function for starting parse_header/2
 %% with the number of the hdu as input (starting at 1)
-parse_hdu_header(Hdu_number, Fits) 
+get_hdu_header(Hdu_number, Fits) 
 when is_integer(Hdu_number),
      is_binary(Fits) ->
         % get the byte offset in Fits of the hdu with number Hdu_number
@@ -83,7 +84,7 @@ when is_integer(Hdu_number),
                         false -> byte_size(Fits) - Pos
                     end,
                 % start parsing
-                parse_hdu_header(binary_part(Fits, Pos, Len));
+                get_hdu_header(binary_part(Fits, Pos, Len));
             % there is no hdu with Hdu_number
             false -> {error, out_of_hdu_range}
         end;
@@ -91,7 +92,7 @@ when is_integer(Hdu_number),
 %% @doc recursively parses a binary for Key, Value, Comment tuples
 %% stops parsing on the occurence of a line starting with "END"
 %% Returns a list of {Keyword, Value, Comment} tuples for the header
-parse_hdu_header(Binary, Plain_text_header) ->
+get_hdu_header(Binary, Plain_text_header) ->
     case Binary of 
         % split off the next/last line of 80 characters
         <<Line:80/binary, Rest/binary>> -> ok;
@@ -127,7 +128,7 @@ parse_hdu_header(Binary, Plain_text_header) ->
                     Key_word_string = string:strip(binary_to_list(Key_word)),
                     Value_string = string:strip(binary_to_list(Value))
             end,
-            parse_hdu_header(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
+            get_hdu_header(Rest, [{Key_word_string, try_type_cast(Value_string), Comment_string}|Plain_text_header])
     end.
 
 
@@ -241,3 +242,66 @@ get_hdus(Fits, Block_count, Result) ->
             get_hdus(Rest, Block_count + 1, Result)
     end.
 
+%% @doc extract the Rows from a hdu data binary
+%% The Row_length parameter should be taken from the NAXIS1 value of
+%% the corresponding header
+%% Returns [] or a List of binaries with each binary being a row
+binary_table_extract_rows(Data, Row_length) ->
+    binary_table_extract_rows(Data, Row_length, []).
+binary_table_extract_rows(Data, Row_length, Result) ->
+    case Data of
+        <<>> -> lists:reverse(Result);
+        <<Row:Row_length/binary, Rest/binary>> ->
+            binary_table_extract_rows(Rest, Row_length, [Row|Result]);
+        _Else -> {error, malformed_hdu_data}
+    end.
+
+
+
+binary_table_extract_fields(Row_data, Col_width, Field_types)
+when Col_width == length(Field_types), is_list(Field_types) ->
+    binary_table_extract_fields(Row_data, Col_width, []).
+binary_table_extract_fields(Row_data, Col_width, Field_types, Result) ->
+
+    case Row_data of
+        <<>> -> lists:reverse(Result);
+        <<Field:Col_width/binary, Rest/binary>> -> binary_table_extract_fields(Rest, Col_width, tl(Field_types), [Field|Result]);
+        _Else -> {error, malformed_row_data}
+    end.
+    
+
+parse_binary_table(Data, Header) ->
+
+    {_, BITPIX, _}  = lists:keyfind("BITPIX", 1, Header),
+    {_, NAXIS, _}   = lists:keyfind("NAXIS", 1, Header),
+    {_, NAXIS1, _}  = lists:keyfind("NAXIS1", 1, Header),
+    {_, NAXIS2, _}  = lists:keyfind("NAXIS2", 1, Header),
+    {_, PCOUNT, _}  = lists:keyfind("PCOUNT", 1, Header),
+    {_, GCOUNT, _}  = lists:keyfind("GCOUNT", 1, Header),
+    {_, TFIELDS, _} = lists:keyfind("TFIELDS", 1, Header),
+    TFORM = [ lists:keyfind("TFORM" ++ integer_to_list(N), 1, Header) 
+              || N <- lists:seq(1, TFIELDS)
+            ],
+    TTYPE = [ lists:keyfind("TTYPE" ++ integer_to_list(N), 1, Header) 
+              || N <- lists:seq(1, TFIELDS)
+            ],
+    TUNIT = [ lists:keyfind("TUNIT" ++ integer_to_list(N), 1, Header) 
+              || N <- lists:seq(1, TFIELDS)
+            ],
+    TNULL = [ lists:keyfind("TNULL" ++ integer_to_list(N), 1, Header) 
+              || N <- lists:seq(1, TFIELDS)
+            ],
+    TDISP = [ lists:keyfind("TDISP" ++ integer_to_list(N), 1, Header) 
+              || N <- lists:seq(1, TFIELDS)
+            ],
+    TSCAL = [ lists:keyfind("TSCAL" ++ integer_to_list(N), 1, Header) 
+              || N <- lists:seq(1, TFIELDS)
+            ],
+    TZERO = [ lists:keyfind("TSCAL" ++ integer_to_list(N), 1, Header) 
+              || N <- lists:seq(1, TFIELDS)
+            ]
+    
+
+.
+    
+    
