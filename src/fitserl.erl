@@ -31,12 +31,23 @@ when
 try_type_cast(Input_string) 
 when is_list(Input_string) ->
     Value_string = string:strip(Input_string),
-    Value_binary = list_to_binary(Value_string),
-    case [binary:first(Value_binary), binary:last(Value_binary)] of
-        %% a string in single quotes
-        [<<"'">>,<<"'">>] -> Value_string;
+    case hd(Value_string) of
+        %% a string starting with single quote (ASCII 39)
+        39 -> 
+            % try to get the string within the single quotes without blanks
+            Temp_string = string:substr(Value_string, string:chr(Value_string, 39)+1),
+            string:strip(
+                string:substr(
+                    Temp_string,
+                    1,
+                    case string:chr(Temp_string, 39) -1 of 
+                        -1 -> length(Temp_string);
+                        Else -> Else
+                    end
+                )
+            );
         %% possibly a number
-        [_,_] ->
+        _ ->
             case string:str(Value_string, ".") of
                 % no "." can be found -> possibly integer
                 0 -> 
@@ -58,7 +69,6 @@ when is_list(Input_string) ->
                     end
             end
     end.
-
 
 %% @doc helper function for starting parse_header/2
 %% Input is Binary_data containing an hdu starting at offset 0
@@ -258,14 +268,113 @@ binary_table_extract_rows(Data, Row_length, Result) ->
 
 
 
-binary_table_extract_fields(Row_data, Col_width, Field_types)
-when Col_width == length(Field_types), is_list(Field_types) ->
-    binary_table_extract_fields(Row_data, Col_width, []).
-binary_table_extract_fields(Row_data, Col_width, Field_types, Result) ->
-
+binary_table_extract_fields(Row_data, TFORM)
+when is_binary(Row_data), is_list(TFORM) ->
+    binary_table_extract_fields(Row_data, TFORM, []).
+binary_table_extract_fields(Row_data, TFORM, Result) ->
+    Field_types =
+        [
+        {"L", {logical, 1,
+             fun(Binary) ->
+                case Binary of
+                    <<"T">> -> true;
+                    <<"F">> -> false;
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"X", {bit_array, 1,
+             fun(Binary) -> Binary %FIXME: I don't understand the definition
+             end
+            }
+        },
+        {"B", {unsigned_8_bit_integer, 1,
+             fun(Binary) -> 
+                case Binary of 
+                    <<Integer8bu:8/big-unsigned-integer-unit:1>> -> Integer8bu;
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"I", {signed_16_bit_integer, 2,
+             fun(Binary) ->
+                case Binary of 
+                    <<Integer16bs:16/big-signed-integer>> -> Integer16bs;
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"J", {signed_32_bit_integer, 4,
+             fun(Binary) ->
+                case Binary of
+                    <<Integer32bs:32/big-signed-integer>> -> Integer32bs;
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"A", {character_string, 1,
+             fun(Binary) ->
+                case Binary of 
+                    <<0>> -> [];
+                    <<_Character>> -> binary_to_list(Binary);
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"E", {single_precision_float, 4,
+             fun(Binary) ->
+                case Binary of
+                    <<Float32bs:32/big-float>> -> Float32bs;
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"D", {double_precision_float, 8,
+             fun(Binary) ->
+                case Binary of
+                    <<Float64bs:64/big-float>> -> Float64bs;
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"C", {single_precision_complex, 8,
+             fun(Binary) ->
+                case Binary of
+                    <<Real32bs:32/big-float,Imaginary32bs:32/big-float>> -> {Real32bs, Imaginary32bs};
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"M", {double_precision_complex, 16,
+             fun(Binary) ->
+                case Binary of
+                    <<Real64bs:64/big-float,Imaginary64bs:64/big-float>> -> {Real64bs, Imaginary64bs};
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        },
+        {"P", {array_descriptor, 8,
+             fun(Binary) ->
+                case Binary of
+                    <<Integer32b_1:32/big-integer,Integer32b_2:32/big-integer>> -> {Integer32b_1, Integer32b_2};
+                    _Else -> {error, value_not_allowed}
+                end
+            end}
+        }
+        ],
+    case TFORM of 
+        [] -> 
+            Field_type = [],
+            Byte_length = 0,
+            Handle_field_fun = fun() -> [] end;
+        _ ->
+            {_,Field_type,_} = hd(TFORM),
+            {_Key, {_Type, Byte_length, Handle_field_fun}} = lists:keyfind(Field_type, 1, Field_types)
+    end,
     case Row_data of
         <<>> -> lists:reverse(Result);
-        <<Field:Col_width/binary, Rest/binary>> -> binary_table_extract_fields(Rest, Col_width, tl(Field_types), [Field|Result]);
+        <<Field:Byte_length/binary, Rest/binary>> -> 
+            binary_table_extract_fields(Rest,tl(TFORM), [Handle_field_fun(Field)|Result]);
         _Else -> {error, malformed_row_data}
     end.
     
