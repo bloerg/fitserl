@@ -268,9 +268,15 @@ binary_table_extract_rows(Data, Row_length, Result) ->
 
 
 
+%% @doc convert extracted row data from binary to typed values
+%% TFORM determines the types of the fields 
+%% Returns [] or a List of fields where each field is the value
+%% stored in a column of the row
+
 binary_table_extract_fields(Row_data, TFORM)
 when is_binary(Row_data), is_list(TFORM) ->
     binary_table_extract_fields(Row_data, TFORM, []).
+
 binary_table_extract_fields(Row_data, TFORM, Result) ->
     Field_types =
         [
@@ -367,20 +373,23 @@ binary_table_extract_fields(Row_data, TFORM, Result) ->
             Field_type = [],
             Byte_length = 0,
             Handle_field_fun = fun() -> [] end;
-        _ ->
-            {_,Field_type,_} = hd(TFORM),
+        [{_, Field_type, _}|_] ->
             {_Key, {_Type, Byte_length, Handle_field_fun}} = lists:keyfind(Field_type, 1, Field_types)
     end,
     case Row_data of
-        <<>> -> lists:reverse(Result);
+        <<Field:Byte_length/binary>> -> lists:reverse([Handle_field_fun(Field)|Result]);
         <<Field:Byte_length/binary, Rest/binary>> -> 
             binary_table_extract_fields(Rest,tl(TFORM), [Handle_field_fun(Field)|Result]);
         _Else -> {error, malformed_row_data}
     end.
     
 
-parse_binary_table(Data, Header) ->
+%% @doc parses a HDU in a Fits binary blog which contains a binary table
+%% Returns list of rows
+parse_binary_table({fits, Fits}, {hdu, HDU}) ->
 
+    Header = get_hdu_header(2, Fits),
+    
     {_, BITPIX, _}  = lists:keyfind("BITPIX", 1, Header),
     {_, NAXIS, _}   = lists:keyfind("NAXIS", 1, Header),
     {_, NAXIS1, _}  = lists:keyfind("NAXIS1", 1, Header),
@@ -408,9 +417,12 @@ parse_binary_table(Data, Header) ->
             ],
     TZERO = [ lists:keyfind("TSCAL" ++ integer_to_list(N), 1, Header) 
               || N <- lists:seq(1, TFIELDS)
-            ]
-    
+            ],
 
+        [
+            fitserl:binary_table_extract_fields(Row, TFORM) 
+            || Row <- binary_table_extract_rows(get_hdu_data(HDU, Fits), NAXIS1)
+        ]
 .
-    
+
     
